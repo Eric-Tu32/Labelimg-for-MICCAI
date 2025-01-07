@@ -621,12 +621,13 @@ class Canvas(QWidget):
         if int(Qt.ControlModifier) | int(Qt.ShiftModifier) == int(mods) and v_delta:
             self.lightRequest.emit(v_delta)
         elif int(Qt.ShiftModifier) == int(mods) and v_delta:
-            self.scrollNextRequest.emit(v_delta)
+            v_delta and self.scrollRequest.emit(v_delta, Qt.Vertical)
+            h_delta and self.scrollRequest.emit(h_delta, Qt.Horizontal)
         elif Qt.ControlModifier == int(mods) and v_delta:
             self.zoomRequest.emit(v_delta)
         else:
-            v_delta and self.scrollRequest.emit(v_delta, Qt.Vertical)
-            h_delta and self.scrollRequest.emit(h_delta, Qt.Horizontal)
+            self.scrollNextRequest.emit(v_delta)
+            
         ev.accept()
 
     def keyPressEvent(self, ev):
