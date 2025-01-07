@@ -127,7 +127,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Create a widget for using default label
         self.use_default_label_checkbox = QCheckBox(get_str('useDefaultLabel'))
-        self.use_default_label_checkbox.setChecked(False)
+        self.use_default_label_checkbox.setChecked(True)
         self.default_label_combo_box = DefaultLabelComboBox(self,items=self.label_hist)
 
         use_default_label_qhbox_layout = QHBoxLayout()
@@ -185,6 +185,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.color_dialog = ColorDialog(parent=self)
 
         self.canvas = Canvas(parent=self)
+        self.canvas.scrollNextRequest.connect(self.scrollNext_request)
         self.canvas.zoomRequest.connect(self.zoom_request)
         self.canvas.lightRequest.connect(self.light_request)
         self.canvas.set_drawing_shape_to_square(settings.get(SETTING_DRAW_SQUARE, False))
@@ -198,6 +199,8 @@ class MainWindow(QMainWindow, WindowMixin):
         }
         self.scroll_area = scroll
         self.canvas.scrollRequest.connect(self.scroll_request)
+        # self.canvas.setMouseTracking(True)
+        # self.canvas.setFocusPolicy(Qt.StrongFocus)
 
         self.canvas.newShape.connect(self.new_shape)
         self.canvas.shapeMoved.connect(self.set_dirty)
@@ -412,6 +415,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Auto saving : Enable auto saving if pressing next
         self.auto_saving = QAction(get_str('autoSaveMode'), self)
         self.auto_saving.setCheckable(True)
+        self.auto_saving.setChecked(True)
         self.auto_saving.setChecked(settings.get(SETTING_AUTO_SAVE, False))
         # Sync single class mode from PR#106
         self.single_class_mode = QAction(get_str('singleClsMode'), self)
@@ -1010,6 +1014,17 @@ class MainWindow(QMainWindow, WindowMixin):
     def add_zoom(self, increment=10):
         self.set_zoom(self.zoom_widget.value() + increment)
 
+    def scrollNext_request(self, delta):
+        """
+        Handle mouse scroll events to navigate images.
+        """
+        if delta > 0:  # Scroll up
+            # print('Scrolled up!')
+            self.open_prev_image()
+        elif delta < 0:  # Scroll down
+            # print('Scrolled down!')
+            self.open_next_image()
+
     def zoom_request(self, delta):
         # get the current scrollbar positions
         # calculate the percentages ~ coordinates
@@ -1449,6 +1464,18 @@ class MainWindow(QMainWindow, WindowMixin):
 
         if filename:
             self.load_file(filename)
+    
+    def wheelEvent(self, event):
+        """
+        Handle mouse scroll events to navigate images.
+        """
+        delta = event.angleDelta().y()
+        if delta > 0:  # Scroll up
+            # print('Scrolled up!')
+            self.open_prev_image()
+        elif delta < 0:  # Scroll down
+            # print('Scrolled down!')
+            self.open_next_image()
 
     def open_file(self, _value=False):
         if not self.may_continue():

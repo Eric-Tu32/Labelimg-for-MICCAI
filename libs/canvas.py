@@ -22,6 +22,7 @@ CURSOR_GRAB = Qt.OpenHandCursor
 
 
 class Canvas(QWidget):
+    scrollNextRequest = pyqtSignal(int)
     zoomRequest = pyqtSignal(int)
     lightRequest = pyqtSignal(int)
     scrollRequest = pyqtSignal(int, int)
@@ -619,6 +620,8 @@ class Canvas(QWidget):
         mods = ev.modifiers()
         if int(Qt.ControlModifier) | int(Qt.ShiftModifier) == int(mods) and v_delta:
             self.lightRequest.emit(v_delta)
+        elif int(Qt.ShiftModifier) == int(mods) and v_delta:
+            self.scrollNextRequest.emit(v_delta)
         elif Qt.ControlModifier == int(mods) and v_delta:
             self.zoomRequest.emit(v_delta)
         else:
