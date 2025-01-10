@@ -19,7 +19,6 @@ DEFAULT_SELECT_FILL_COLOR = QColor(0, 128, 255, 155)
 DEFAULT_VERTEX_FILL_COLOR = QColor(0, 255, 0, 255)
 DEFAULT_HVERTEX_FILL_COLOR = QColor(255, 0, 0)
 
-
 class Shape(object):
     P_SQUARE, P_ROUND = range(2)
 
@@ -38,13 +37,14 @@ class Shape(object):
     scale = 1.0
     label_font_size = 8
 
-    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False):
+    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False, diffuse=False):
         self.label = label
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
         self.paint_label = paint_label
+        self.diffuse = diffuse
 
         self._highlight_index = None
         self._highlight_mode = self.NEAR_VERTEX

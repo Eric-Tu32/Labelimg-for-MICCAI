@@ -869,6 +869,36 @@ class MainWindow(QMainWindow, WindowMixin):
         self.update_combo_box()
         self.canvas.load_shapes(s)
 
+    def xml_shapes_to_shapeobj(self, shapes):
+        s = []
+        for label, points, line_color, fill_color, difficult in shapes:
+            shape = Shape(label=label)
+            for x, y in points:
+
+                # Ensure the labels are within the bounds of the image. If not, fix them.
+                x, y, snapped = self.canvas.snap_point_to_canvas(x, y)
+                if snapped:
+                    self.set_dirty()
+
+                shape.add_point(QPointF(x, y))
+            shape.difficult = difficult
+            shape.close()
+            s.append(shape)
+
+            if line_color:
+                shape.line_color = QColor(*line_color)
+            else:
+                shape.line_color = generate_color_by_text(label)
+
+            if fill_color:
+                shape.fill_color = QColor(*fill_color)
+            else:
+                shape.fill_color = generate_color_by_text(label)
+
+            self.add_label(shape)
+
+        return s
+
     def update_combo_box(self):
         # Get the unique labels and add them to the Combobox.
         items_text_list = [str(self.label_list.item(i).text()) for i in range(self.label_list.count())]
@@ -880,7 +910,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.combo_box.update_items(unique_text_list)
 
-    def save_labels(self, annotation_file_path):
+    def save_labels(self, annotation_file_path, p_shapes):
         annotation_file_path = ustr(annotation_file_path)
         if self.label_file is None:
             self.label_file = LabelFile()
@@ -892,9 +922,10 @@ class MainWindow(QMainWindow, WindowMixin):
                         fill_color=s.fill_color.getRgb(),
                         points=[(p.x(), p.y()) for p in s.points],
                         # add chris
-                        difficult=s.difficult)
+                        difficult=s.difficult,
+                        diffuse=s.diffuse)
 
-        shapes = [format_shape(shape) for shape in self.canvas.shapes]
+        shapes = [format_shape(shape) for shape in p_shapes]
         # Can add different annotation formats here
         try:
             if self.label_file_format == LabelFileFormat.PASCAL_VOC:
@@ -1321,7 +1352,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if dir_path is not None and len(dir_path) > 1:
             self.default_save_dir = dir_path
 
-        self.show_bounding_box_from_annotation_file(self.file_path)
+        self.show_bounding_box_from_annotation_file(str(self.file_path))
 
         self.statusBar().showMessage('%s . Annotation will be saved to %s' %
                                      ('Change saved folder', self.default_save_dir))
@@ -1492,23 +1523,55 @@ class MainWindow(QMainWindow, WindowMixin):
             self.load_file(filename)
 
     def save_file(self, _value=False):
+
+        # Next File
+        next_filepath = None
+        if self.cur_img_idx + 1 < self.img_count:
+            next_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx + 1])[0]
+
+        # Previous File
+        prev_filepath = None
+        if self.cur_img_idx - 1 >= 0:
+            prev_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx - 1])[0]
+
+        print('Next: ', next_filepath)
+        print('Prev: ', prev_filepath)
+
+        diffuse_shapes = [shape for shape in self.canvas.shapes if shape.diffuse]
+
+        if next_filepath:
+            next_parse_reader = PascalVocReader(next_filepath + XML_EXT)
+            next_shapes = self.xml_shapes_to_shapeobj(next_parse_reader.get_shapes()) + diffuse_shapes
+        if prev_filepath:
+            prev_parse_reader = PascalVocReader(prev_filepath + XML_EXT)
+            prev_shapes = self.xml_shapes_to_shapeobj(prev_parse_reader.get_shapes()) + diffuse_shapes
+
+        # print(prev_shapes)
+        # print(next_shapes)
+
         if self.default_save_dir is not None and len(ustr(self.default_save_dir)):
             if self.file_path:
                 image_file_name = os.path.basename(self.file_path)
                 saved_file_name = os.path.splitext(image_file_name)[0]
                 saved_path = os.path.join(ustr(self.default_save_dir), saved_file_name)
-                self._save_file(saved_path)
+                self._save_file(saved_path, self.canvas.shapes)
+                if len(diffuse_shapes) > 0:
+                    if next_filepath: self._save_file(next_filepath, next_shapes)
+                    if prev_filepath: self._save_file(prev_filepath, prev_shapes)
         else:
             image_file_dir = os.path.dirname(self.file_path)
             image_file_name = os.path.basename(self.file_path)
             saved_file_name = os.path.splitext(image_file_name)[0]
             saved_path = os.path.join(image_file_dir, saved_file_name)
             self._save_file(saved_path if self.label_file
-                            else self.save_file_dialog(remove_ext=False))
+                            else self.save_file_dialog(remove_ext=False), self.canvas.shapes)
+            if len(diffuse_shapes) > 0:
+                if next_filepath: self._save_file(next_filepath, next_shapes)
+                if prev_filepath: self._save_file(prev_filepath, prev_shapes)
 
     def save_file_as(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
-        self._save_file(self.save_file_dialog())
+        self._save_file(self.save_file_dialog(), self.canvas.shapes)
 
     def save_file_dialog(self, remove_ext=True):
         caption = '%s - Choose File' % __appname__
@@ -1528,8 +1591,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 return full_file_path
         return ''
 
-    def _save_file(self, annotation_file_path):
-        if annotation_file_path and self.save_labels(annotation_file_path):
+    def _save_file(self, annotation_file_path, shapes):
+        if annotation_file_path and self.save_labels(annotation_file_path, shapes):
             self.set_clean()
             self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
             self.statusBar().show()

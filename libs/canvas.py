@@ -37,15 +37,22 @@ class Canvas(QWidget):
 
     def __init__(self, *args, **kwargs):
         super(Canvas, self).__init__(*args, **kwargs)
+
+        self.is_diffuse = False
+
         # Initialise local state.
         self.mode = self.EDIT
         self.shapes = []
         self.current = None
         self.selected_shape = None  # save the selected shape here
         self.selected_shape_copy = None
+
         self.drawing_line_color = QColor(0, 0, 255)
         self.drawing_rect_color = QColor(0, 0, 255)
+        self.penetrate_drawing_line_color = QColor(255, 0, 0)
+        self.penetrate_drawing_rect_color = QColor(255, 0, 0)
         self.line = Shape(line_color=self.drawing_line_color)
+
         self.prev_point = QPointF()
         self.offsets = QPointF(), QPointF()
         self.scale = 1.0
@@ -63,7 +70,7 @@ class Canvas(QWidget):
         self.menus = (QMenu(), QMenu())
         # Set widget options.
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.WheelFocus)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.verified = False
         self.draw_square = False
 
@@ -93,6 +100,8 @@ class Canvas(QWidget):
         return self.mode == self.EDIT
 
     def set_editing(self, value=True):
+        print('set_editing called')
+
         self.mode = self.EDIT if value else self.CREATE
         if not value:  # Create
             self.un_highlight()
@@ -157,7 +166,11 @@ class Canvas(QWidget):
                 else:
                     self.line[1] = pos
 
-                self.line.line_color = color
+                if self.is_diffuse:
+                    self.line.line_color = self.penetrate_drawing_line_color
+                else:
+                    self.line.line_color = color
+
                 self.prev_point = QPointF()
                 self.current.highlight_clear()
             else:
@@ -321,7 +334,12 @@ class Canvas(QWidget):
             self.repaint()
 
     def handle_drawing(self, pos):
-        if self.current and self.current.reach_max_points() is False:
+        if self.current and self.current.reach_max_points() is False: # 放開的時候呼叫
+            print('handle_drawing (if) called')
+            if self.is_diffuse:
+                self.current.diffuse = True
+            else:
+                print('ctrl not pressed')
             init_pos = self.current[0]
             min_x = init_pos.x()
             min_y = init_pos.y()
@@ -332,7 +350,10 @@ class Canvas(QWidget):
             self.current.add_point(target_pos)
             self.current.add_point(QPointF(min_x, max_y))
             self.finalise()
-        elif not self.out_of_pixmap(pos):
+            self.is_diffuse = False
+        elif not self.out_of_pixmap(pos): # 按下去的時候呼叫
+            print('handle_drawing (elif) called')
+
             self.current = Shape()
             self.current.add_point(pos)
             self.line.points = [pos, pos]
@@ -496,6 +517,10 @@ class Canvas(QWidget):
     def paintEvent(self, event):
         if not self.pixmap:
             return super(Canvas, self).paintEvent(event)
+        
+        mods = QApplication.keyboardModifiers()
+        if mods & Qt.ControlModifier:
+            self.is_diffuse = True
 
         p = self._painter
         p.begin(self)
@@ -533,13 +558,20 @@ class Canvas(QWidget):
             right_bottom = self.line[1]
             rect_width = right_bottom.x() - left_top.x()
             rect_height = right_bottom.y() - left_top.y()
-            p.setPen(self.drawing_rect_color)
+            if self.is_diffuse:
+                p.setPen(self.penetrate_drawing_rect_color)
+            else:
+                p.setPen(self.drawing_rect_color)
             brush = QBrush(Qt.BDiagPattern)
             p.setBrush(brush)
             p.drawRect(int(left_top.x()), int(left_top.y()), int(rect_width), int(rect_height))
 
         if self.drawing() and not self.prev_point.isNull() and not self.out_of_pixmap(self.prev_point):
-            p.setPen(QColor(0, 0, 0))
+            if self.is_diffuse:
+                p.setPen(QColor("red"))
+            else:
+                p.setPen(QColor(0, 0, 0))
+
             p.drawLine(int(self.prev_point.x()), 0, int(self.prev_point.x()), int(self.pixmap.height()))
             p.drawLine(0, int(self.prev_point.y()), int(self.pixmap.width()), int(self.prev_point.y()))
 
@@ -684,11 +716,17 @@ class Canvas(QWidget):
     def set_last_label(self, text, line_color=None, fill_color=None):
         assert text
         self.shapes[-1].label = text
-        if line_color:
-            self.shapes[-1].line_color = line_color
+        if not self.shapes[-1].diffuse:
+            if line_color:
+                self.shapes[-1].line_color = line_color
+                # self.shapes[-1].line_color = QColor("red")
 
-        if fill_color:
-            self.shapes[-1].fill_color = fill_color
+            if fill_color:
+                self.shapes[-1].fill_color = fill_color
+        else:
+            self.shapes[-1].line_color = QColor("red")
+            if fill_color:
+                self.shapes[-1].fill_color = fill_color
 
         return self.shapes[-1]
 
