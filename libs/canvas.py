@@ -100,8 +100,6 @@ class Canvas(QWidget):
         return self.mode == self.EDIT
 
     def set_editing(self, value=True):
-        print('set_editing called')
-
         self.mode = self.EDIT if value else self.CREATE
         if not value:  # Create
             self.un_highlight()
@@ -335,11 +333,8 @@ class Canvas(QWidget):
 
     def handle_drawing(self, pos):
         if self.current and self.current.reach_max_points() is False: # 放開的時候呼叫
-            print('handle_drawing (if) called')
             if self.is_diffuse:
                 self.current.diffuse = True
-            else:
-                print('ctrl not pressed')
             init_pos = self.current[0]
             min_x = init_pos.x()
             min_y = init_pos.y()
@@ -352,8 +347,6 @@ class Canvas(QWidget):
             self.finalise()
             self.is_diffuse = False
         elif not self.out_of_pixmap(pos): # 按下去的時候呼叫
-            print('handle_drawing (elif) called')
-
             self.current = Shape()
             self.current.add_point(pos)
             self.line.points = [pos, pos]
