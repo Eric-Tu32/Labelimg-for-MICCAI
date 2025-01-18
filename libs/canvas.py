@@ -511,9 +511,9 @@ class Canvas(QWidget):
         if not self.pixmap:
             return super(Canvas, self).paintEvent(event)
         
-        mods = QApplication.keyboardModifiers()
-        if mods & Qt.ControlModifier:
-            self.is_diffuse = True
+        # mods = QApplication.keyboardModifiers()
+        # if mods & Qt.ControlModifier:
+        #     self.is_diffuse = True
 
         p = self._painter
         p.begin(self)
@@ -672,6 +672,8 @@ class Canvas(QWidget):
             self.move_one_pixel('Up')
         elif key == Qt.Key_Down and self.selected_shape:
             self.move_one_pixel('Down')
+        # elif ev.modifiers() == Qt.ShiftModifier:
+        #     self.is_diffuse = not self.is_diffuse
 
     def move_one_pixel(self, direction):
         # print(self.selectedShape.points)

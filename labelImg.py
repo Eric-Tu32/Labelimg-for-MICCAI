@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import codecs
+import json
 import os.path
 import platform
 import shutil
@@ -24,6 +25,7 @@ except ImportError:
     from PyQt4.QtGui import *
     from PyQt4.QtCore import *
 
+from libs.checkboxDialog import CheckboxDialog
 from libs.combobox import ComboBox
 from libs.default_label_combobox import DefaultLabelComboBox
 from libs.resources import *
@@ -99,6 +101,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.last_open_dir = None
         self.cur_img_idx = 0
         self.img_count = len(self.m_img_list)
+        
+        self.ratings = None
 
         # Whether we need to save or not.
         self.dirty = False
@@ -163,8 +167,6 @@ class MainWindow(QMainWindow, WindowMixin):
         self.label_list.itemChanged.connect(self.label_item_changed)
         list_layout.addWidget(self.label_list)
 
-
-
         self.dock = QDockWidget(get_str('boxLabelText'), self)
         self.dock.setObjectName(get_str('labels'))
         self.dock.setWidget(label_list_container)
@@ -179,6 +181,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.file_dock = QDockWidget(get_str('fileList'), self)
         self.file_dock.setObjectName(get_str('files'))
         self.file_dock.setWidget(file_list_container)
+
+        self.radio_groups = []
+        self.add_ratings_sidebar()
 
         self.zoom_widget = ZoomWidget()
         self.light_widget = LightWidget(get_str('lightWidgetTitle'))
@@ -231,7 +236,12 @@ class MainWindow(QMainWindow, WindowMixin):
 
         open_annotation = action(get_str('openAnnotation'), self.open_annotation_dialog,
                                  'Ctrl+Shift+O', 'open', get_str('openAnnotationDetail'))
-        copy_prev_bounding = action(get_str('copyPrevBounding'), self.copy_previous_bounding_boxes, 'Ctrl+v', 'copy', get_str('copyPrevBounding'))
+        
+        copy_prev_bounding = action(get_str('copyPrevBounding'), self.copy_previous_bounding_boxes, 'Ctrl+c', 'copy', get_str('copyPrevBounding'))
+        
+        copy_next_bounding = action("copy_next_bounding", self.copy_next_bounding_boxes, 'Ctrl+v', 'copy', "copy_next_bounding")
+
+        copy_both_bounding = action("copy_both_bounding", self.copy_both_bounding_boxes, 'Ctrl+b', 'copy', "copy_both_bounding")
 
         open_next_image = action(get_str('nextImg'), self.open_next_image,
                                  'd', 'next', get_str('nextImgDetail'))
@@ -285,6 +295,9 @@ class MainWindow(QMainWindow, WindowMixin):
         copy = action(get_str('dupBox'), self.copy_selected_shape,
                       'Ctrl+D', 'copy', get_str('dupBoxDetail'),
                       enabled=False)
+        
+        check_label_finished = action('標注完整檢驗', self.show_popup,
+                                       'Shift+D', 'check_label_finished', 'open checkbox', enabled=True)
 
         advanced_mode = action(get_str('advancedMode'), self.toggle_advanced_mode,
                                'Ctrl+Shift+A', 'expert', get_str('advancedModeDetail'),
@@ -348,6 +361,7 @@ class MainWindow(QMainWindow, WindowMixin):
                            'Ctrl+Shift+=', 'light_reset', get_str('lightresetDetail'), checkable=True, enabled=False)
         light_org.setChecked(True)
 
+
         # Group light controls into a list for easier toggling.
         light_actions = (self.light_widget, light_brighten,
                          light_darken, light_org)
@@ -384,7 +398,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
-                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
+                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy, check_label_finished=check_label_finished,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
                               zoom=zoom, zoomIn=zoom_in, zoomOut=zoom_out, zoomOrg=zoom_org,
@@ -432,7 +446,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.display_label_option.triggered.connect(self.toggle_paint_labels_option)
 
         add_actions(self.menus.file,
-                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
+                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, copy_next_bounding, copy_both_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
         add_actions(self.menus.help, (help_default, show_info, show_shortcut))
         add_actions(self.menus.view, (
             self.auto_saving,
@@ -456,7 +470,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.actions.beginner = (
             open, open_dir, change_save_dir, open_next_image, open_prev_image, verify, save, save_format, None, create, copy, delete, None,
             zoom_in, zoom, zoom_out, fit_window, fit_width, None,
-            light_brighten, light, light_darken, light_org)
+            light_brighten, light, light_darken, light_org, check_label_finished)
 
         self.actions.advanced = (
             open, open_dir, change_save_dir, open_next_image, open_prev_image, save, save_format, None,
@@ -543,6 +557,124 @@ class MainWindow(QMainWindow, WindowMixin):
         # Open Dir if default file
         if self.file_path and os.path.isdir(self.file_path):
             self.open_dir_dialog(dir_path=self.file_path, silent=True)
+
+    def add_ratings_sidebar(self):
+        # Create the main widget for the dock
+        ratings_widget = QWidget()
+        ratings_layout = QVBoxLayout()
+
+        # Questions and options
+        questions = [
+            ("影像總體品質", ["1: Uninterpretable", "2: Poor", "3: Fair", "4: Good", "5: Excellent"]),
+            ("影像診斷價值", ["1: Uninterpretable", "2: Poor", "3: Fair", "4: Good", "5: Excellent"]),
+            ("影像真實度", ["A：真實SWAN", "B：不清楚/無法判斷", "C：非真實SWAN"]),
+            ("是否有CMB", ["A：有", "B：不清楚/無法判斷", "C：無"]),
+        ]
+
+        for question, options in questions:
+            group = QGroupBox(question)
+            group_layout = QVBoxLayout()
+            button_group = QButtonGroup(self)
+            for option in options:
+                radio_button = QRadioButton(option)
+                radio_button.toggled.connect(self.on_rating_changed)  # Detect changes
+                group_layout.addWidget(radio_button)
+                button_group.addButton(radio_button)
+            group.setLayout(group_layout)
+            ratings_layout.addWidget(group)
+            self.radio_groups.append(button_group)  # Add to main list
+
+        # Add a save button at the bottom
+        self.save_button = QPushButton("Save Ratings")
+        self.save_button.setEnabled(False)  # Initially disabled
+        self.save_button.clicked.connect(self.save_ratings)
+        ratings_layout.addWidget(self.save_button)
+
+        # Set layout to the widget
+        ratings_widget.setLayout(ratings_layout)
+
+        # Create a dock widget
+        dock = QDockWidget("Ratings", self)
+        dock.setWidget(ratings_widget)
+        dock.setAllowedAreas(Qt.RightDockWidgetArea)
+        dock.setObjectName("RatingsDock")
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+
+    def on_rating_changed(self):
+        """Enable the save button when any rating is changed."""
+        self.save_button.setEnabled(True)
+
+    def save_ratings(self):
+        """Save the selected ratings to a JSON file."""
+        if not self.file_path:
+            QMessageBox.information(self, "No File Opened", "Please open a folder or file")
+            return
+        
+        ratings = {}
+        incomplete_questions = []
+
+        for i, button_group in enumerate(self.radio_groups):
+            question_key = f"Q{i + 1}"
+            selected_option = None
+            for button in button_group.buttons():
+                if button.isChecked():
+                    selected_option = button.text()
+                    break
+            if selected_option:
+                ratings[question_key] = selected_option
+            else:
+                incomplete_questions.append(question_key)
+
+        # if incomplete_questions and self.save_button.isEnabled():
+            # QMessageBox.warning(
+            #     self,
+            #     "Incomplete Ratings",
+            #     f"The following questions are unanswered: {', '.join(incomplete_questions)}.\n"
+            #     "Please answer all questions before saving.",
+            # )
+            # return False
+        
+        image_file_name = os.path.basename(self.file_path)
+        saved_file_name = os.path.splitext(image_file_name)[0] + "_ratings.json"
+        saved_path = os.path.join(ustr(self.default_save_dir), saved_file_name)
+
+        with open(saved_path, "w") as f:
+            json.dump(ratings, f, indent=4)
+
+        # QMessageBox.information(self, "Saved", f"Ratings saved to {saved_path}.")
+        print("saved: " + saved_path)
+        self.save_button.setEnabled(False)  # Disable the save button after saving
+
+        return True
+
+    def load_ratings(self):
+        """Load ratings from a JSON file if it exists."""
+        image_file_name = os.path.basename(self.file_path)
+        saved_file_name = os.path.splitext(image_file_name)[0] + "_ratings.json"
+        saved_path = os.path.join(ustr(self.default_save_dir), saved_file_name)
+
+        for button_group in self.radio_groups:
+            button_group.setExclusive(False)
+            for button in button_group.buttons():
+                button.setChecked(False)
+            button_group.setExclusive(True)
+
+        if os.path.exists(saved_path):
+            with open(saved_path, "r") as f:
+                ratings = json.load(f)
+
+            # Populate radio buttons with saved ratings
+            for i, button_group in enumerate(self.radio_groups):
+                question_key = f"Q{i + 1}"
+                if question_key in ratings:
+                    selected_option = ratings[question_key]
+                    for button in button_group.buttons():
+                        if button.text() == selected_option:
+                            button.setChecked(True)
+                            break
+
+        # Force UI refresh
+        self.save_button.setEnabled(False)
 
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key_Control:
@@ -1051,10 +1183,8 @@ class MainWindow(QMainWindow, WindowMixin):
         Handle mouse scroll events to navigate images.
         """
         if delta > 0:  # Scroll up
-            # print('Scrolled up!')
             self.open_prev_image()
         elif delta < 0:  # Scroll down
-            # print('Scrolled down!')
             self.open_next_image()
 
     def zoom_request(self, delta):
@@ -1132,6 +1262,85 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def add_light(self, increment=10):
         self.set_light(self.light_widget.value() + increment)
+
+    def show_popup(self):
+        strings = []
+        if self.dir_name == None:
+            strings.append("No Folder or File Opened")
+        else:
+            files = os.listdir(self.dir_name)
+            json_files = list(filter(lambda path: path.endswith(".json"), files))
+            unfinished_files = ['未完成：']
+            unlabeled_files = ['未標注：']
+            incorrect_files = ['標注衝突（Q4答案與CMB標注不符）：']
+            required_keys = {"Q1", "Q2", "Q3", "Q4"}
+
+            # =============================== UNFINISHED_FILES + INCORRECT_FILES ===============================
+
+            for path in json_files:
+                try:
+                    with open(os.path.join(self.dir_name, path), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        
+                        if required_keys.issubset(data.keys()):
+                            xml_file_path = os.path.join(self.dir_name, os.path.splitext(path)[0][:-8] + XML_EXT)
+                            if data['Q4'][0] == 'A':
+                                if not os.path.isfile(xml_file_path):
+                                    incorrect_files.append(f" - {os.path.splitext(path)[0][:-8] + '.png'}: Q4為A，但無標注CMB")
+                                else:
+                                    parse_reader = PascalVocReader(xml_file_path)
+                                    if len(self.xml_shapes_to_shapeobj(parse_reader.get_shapes())) <= 0:
+                                        incorrect_files.append(f" - {os.path.splitext(path)[0][:-8] + '.png'}: Q4為A，但無標注CMB")
+                            elif data['Q4'][0] == 'C':
+                                if not os.path.isfile(xml_file_path):
+                                    pass
+                                else:
+                                    parse_reader = PascalVocReader(xml_file_path)
+                                    if len(self.xml_shapes_to_shapeobj(parse_reader.get_shapes())) > 0:
+                                        incorrect_files.append(f" - {os.path.splitext(path)[0][:-8] + '.png'}: Q4為C，但有標注CMB")
+                        else:
+                            # missing_keys = required_keys - data.keys()
+                            unfinished_files.append(f" - {os.path.splitext(path)[0][:-8] + '.png'}")
+                        
+                except json.JSONDecodeError:
+                    print(f"Invalid JSON format in file: {path}")
+
+            if len(unfinished_files) > 11:
+                unfinished_files = unfinished_files[:11] + [f" - 與其餘{len(unfinished_files)-11}個檔案"]
+            elif len(unfinished_files) == 1:
+                unfinished_files.append(" - 檔案皆標注完整")
+
+            if len(incorrect_files) > 11:
+                incorrect_files = incorrect_files[:11] + [f" - 與其餘{len(incorrect_files)-11}個檔案"]
+            elif len(incorrect_files) == 1:
+                incorrect_files.append(" - 檔案皆無標注衝突")
+
+            # =============================== UNLABELED_FILES ===============================
+
+            for path in files:
+                if path.endswith('.png'):
+                    rating_path = os.path.join(self.dir_name, os.path.splitext(path)[0] + '_ratings.json')
+                    if not os.path.isfile(rating_path):
+                        unlabeled_files.append(f" - {path}")
+            if len(unlabeled_files) > 11:
+                unlabeled_files = unlabeled_files[:11] + [f" - 與其餘{len(unlabeled_files)-11}個檔案"]
+            elif len(unlabeled_files) == 1:
+                unlabeled_files.append(" - 檔案皆已標注")
+
+            strings = unfinished_files + [''] + incorrect_files + [''] + unlabeled_files
+
+        message = QMessageBox(self)
+        message.setWindowTitle("檢驗結果")
+        styled_text = "<br>".join([
+            f'<span style="color:red; font-size:24px;">{text}</span>' if text in ['未標注：', '未完成：', '標注衝突（Q4答案與CMB標注不符）：'] 
+            else f'<span style="color:green; font-size:20px;">{text}</span>' if text in [" - 檔案皆標注完整", " - 檔案皆無標注衝突", " - 檔案皆已標注"] 
+            else f'<span style="font-size:20px;">{text}</span>' for text in strings 
+        ])
+
+        # Set styled text
+        message.setText(styled_text)
+        message.setStandardButtons(QMessageBox.Ok)
+        message.exec_()
 
     def toggle_polygons(self, value):
         for item, shape in self.items_to_shapes.items():
@@ -1215,6 +1424,10 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.label_list.item(self.label_list.count() - 1).setSelected(True)
 
             self.canvas.setFocus(True)
+
+            # Moguy
+            self.load_ratings()
+
             return True
         return False
 
@@ -1341,23 +1554,24 @@ class MainWindow(QMainWindow, WindowMixin):
         return images
 
     def change_save_dir_dialog(self, _value=False):
-        if self.default_save_dir is not None:
-            path = ustr(self.default_save_dir)
-        else:
-            path = '.'
+        # if self.default_save_dir is not None:
+        #     path = ustr(self.default_save_dir)
+        # else:
+        #     path = '.'
 
-        dir_path = ustr(QFileDialog.getExistingDirectory(self,
-                                                         '%s - Save annotations to the directory' % __appname__, path,  QFileDialog.ShowDirsOnly
-                                                         | QFileDialog.DontResolveSymlinks))
+        # dir_path = ustr(QFileDialog.getExistingDirectory(self,
+        #                                                  '%s - Save annotations to the directory' % __appname__, path,  QFileDialog.ShowDirsOnly
+        #                                                  | QFileDialog.DontResolveSymlinks))
 
-        if dir_path is not None and len(dir_path) > 1:
-            self.default_save_dir = dir_path
+        # if dir_path is not None and len(dir_path) > 1:
+        #     self.default_save_dir = dir_path
 
-        self.show_bounding_box_from_annotation_file(str(self.file_path))
+        # self.show_bounding_box_from_annotation_file(str(self.file_path))
 
-        self.statusBar().showMessage('%s . Annotation will be saved to %s' %
-                                     ('Change saved folder', self.default_save_dir))
-        self.statusBar().show()
+        # self.statusBar().showMessage('%s . Annotation will be saved to %s' %
+        #                              ('Change saved folder', self.default_save_dir))
+        # self.statusBar().show()
+        pass
 
 
     def open_annotation_dialog(self, _value=False):
@@ -1447,6 +1661,8 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.default_save_dir is not None:
                 if self.dirty is True:
                     self.save_file()
+                if self.save_button.isEnabled():
+                    success = self.save_ratings()
             else:
                 self.change_save_dir_dialog()
                 return
@@ -1472,6 +1688,8 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.default_save_dir is not None:
                 if self.dirty is True:
                     self.save_file()
+                if self.save_button.isEnabled():
+                    success = self.save_ratings()
             else:
                 self.change_save_dir_dialog()
                 return
@@ -1503,10 +1721,8 @@ class MainWindow(QMainWindow, WindowMixin):
         """
         delta = event.angleDelta().y()
         if delta > 0:  # Scroll up
-            # print('Scrolled up!')
             self.open_prev_image()
         elif delta < 0:  # Scroll down
-            # print('Scrolled down!')
             self.open_next_image()
 
     def open_file(self, _value=False):
@@ -1535,9 +1751,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.cur_img_idx - 1 >= 0:
             prev_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx - 1])[0]
 
-        print('Next: ', next_filepath)
-        print('Prev: ', prev_filepath)
-
         diffuse_shapes = [shape for shape in self.canvas.shapes if shape.diffuse]
 
         if next_filepath:
@@ -1546,9 +1759,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if prev_filepath:
             prev_parse_reader = PascalVocReader(prev_filepath + XML_EXT)
             prev_shapes = self.xml_shapes_to_shapeobj(prev_parse_reader.get_shapes()) + diffuse_shapes
-
-        # print(prev_shapes)
-        # print(next_shapes)
 
         if self.default_save_dir is not None and len(ustr(self.default_save_dir)):
             if self.file_path:
@@ -1729,7 +1939,6 @@ class MainWindow(QMainWindow, WindowMixin):
         self.set_format(FORMAT_YOLO)
         t_yolo_parse_reader = YoloReader(txt_path, self.image)
         shapes = t_yolo_parse_reader.get_shapes()
-        print(shapes)
         self.load_labels(shapes)
         self.canvas.verified = t_yolo_parse_reader.verified
 
@@ -1747,11 +1956,50 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.verified = create_ml_parse_reader.verified
 
     def copy_previous_bounding_boxes(self):
-        current_index = self.m_img_list.index(self.file_path)
-        if current_index - 1 >= 0:
-            prev_file_path = self.m_img_list[current_index - 1]
-            self.show_bounding_box_from_annotation_file(prev_file_path)
-            self.save_file()
+        if not self.file_path:
+            return
+
+        # current_index = self.m_img_list.index(self.file_path)
+        # if current_index - 1 >= 0:
+        #     prev_file_path = self.m_img_list[current_index - 1]
+        #     self.show_bounding_box_from_annotation_file(prev_file_path)
+        #     self.save_file()
+        if self.cur_img_idx - 1 >= 0 and self.canvas.selected_shape:
+            prev_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx - 1])[0]
+            prev_parse_reader = PascalVocReader(prev_filepath + XML_EXT)
+            prev_shapes = self.xml_shapes_to_shapeobj(prev_parse_reader.get_shapes()) + [self.canvas.selected_shape]
+            if prev_filepath: self._save_file(prev_filepath, prev_shapes)
+            self.set_dirty()
+            self.open_prev_image()
+
+    def copy_next_bounding_boxes(self):
+        if not self.file_path:
+            return
+        if self.cur_img_idx + 1 < self.img_count and self.canvas.selected_shape:
+            next_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx + 1])[0]
+            next_parse_reader = PascalVocReader(next_filepath + XML_EXT)
+            next_shapes = self.xml_shapes_to_shapeobj(next_parse_reader.get_shapes()) + [self.canvas.selected_shape]
+            if next_filepath: self._save_file(next_filepath, next_shapes)
+            self.set_dirty()
+            self.open_next_image()
+            # self.show_bounding_box_from_annotation_file(next_filepath)
+            # self.save_file()
+    
+    def copy_both_bounding_boxes(self):
+        if not self.file_path:
+            return
+        if self.cur_img_idx + 1 < self.img_count and self.canvas.selected_shape:
+            next_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx + 1])[0]
+            next_parse_reader = PascalVocReader(next_filepath + XML_EXT)
+            next_shapes = self.xml_shapes_to_shapeobj(next_parse_reader.get_shapes()) + [self.canvas.selected_shape]
+            if next_filepath: self._save_file(next_filepath, next_shapes)
+            self.set_dirty()
+        if self.cur_img_idx - 1 >= 0 and self.canvas.selected_shape:
+            prev_filepath = os.path.splitext(self.m_img_list[self.cur_img_idx - 1])[0]
+            prev_parse_reader = PascalVocReader(prev_filepath + XML_EXT)
+            prev_shapes = self.xml_shapes_to_shapeobj(prev_parse_reader.get_shapes()) + [self.canvas.selected_shape]
+            if prev_filepath: self._save_file(prev_filepath, prev_shapes)
+            self.set_dirty()
 
     def toggle_paint_labels_option(self):
         for shape in self.canvas.shapes:
