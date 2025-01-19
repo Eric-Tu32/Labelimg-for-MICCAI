@@ -1846,6 +1846,7 @@ class MainWindow(QMainWindow, WindowMixin):
                 return True
             elif discard_changes == QMessageBox.Yes:
                 self.save_file()
+                self.save_ratings()
                 return True
             else:
                 return False
