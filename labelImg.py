@@ -1264,10 +1264,14 @@ class MainWindow(QMainWindow, WindowMixin):
         self.set_light(self.light_widget.value() + increment)
 
     def show_popup(self):
+
         strings = []
         if self.dir_name == None:
             strings.append("No Folder or File Opened")
         else:
+            self.save_file()
+            self.save_ratings()
+            
             files = os.listdir(self.dir_name)
             json_files = list(filter(lambda path: path.endswith(".json"), files))
             unfinished_files = ['未完成：']
